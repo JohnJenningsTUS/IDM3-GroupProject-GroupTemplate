@@ -1,0 +1,11 @@
+<!DOCTYPE html>
+<html lang="en" xmlns:th="http://www.thymeleaf.org">
+<body>
+<!-- Shared footer. Include it on a page with:
+     <footer th:replace="~{fragments/footer :: footer}"></footer> -->
+<footer th:fragment="footer" class="site-footer">
+    <span>TUS Gallery Build info:</span>
+    <span class="build-info" th:text="${buildInfo}">local dev</span>
+</footer>
+</body>
+</html>

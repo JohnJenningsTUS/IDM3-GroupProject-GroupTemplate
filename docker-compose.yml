@@ -1,0 +1,55 @@
+# Local dev environment.
+
+services:
+  db:
+    image: mysql:8.4
+    environment:
+      MYSQL_ROOT_PASSWORD: rootpass
+      # Must match the database name in spring.datasource.url
+      MYSQL_DATABASE: idm3project2024
+      MYSQL_USER: gallery
+      MYSQL_PASSWORD: gallerypass
+    ports:
+      - "3306:3306"
+    volumes:
+      - dbdata:/var/lib/mysql
+      # Loaded into MYSQL_DATABASE on first start only (when dbdata is empty).
+      # To reload it: docker compose down -v && docker compose up
+      - ./idm3project2024.sql:/docker-entrypoint-initdb.d/01-idm3project.sql:ro
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  app:
+    build: .
+    ports:
+      - "8080:8080"
+    environment:
+      SPRING_PROFILES_ACTIVE: dev
+      # Inside Docker the database is the "db" service, not localhost
+      SPRING_DATASOURCE_URL: jdbc:mysql://db:3306/idm3project2024
+      SPRING_DATASOURCE_USERNAME: gallery
+      SPRING_DATASOURCE_PASSWORD: gallerypass
+    depends_on:
+      db:
+        condition: service_healthy
+  phpmyadmin:
+    image: phpmyadmin:5.2
+    ports:
+      - "8081:80"
+    environment:
+      PMA_HOST: db
+      # Uncomment to Log in automatically as the app's user (local dev only)
+      #PMA_USER: gallery
+      #PMA_PASSWORD: gallerypass
+      
+      # Allows importing larger .sql dumps
+      UPLOAD_LIMIT: 64M
+    depends_on:
+      db:
+        condition: service_healthy
+
+volumes:
+  dbdata:

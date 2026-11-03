@@ -1,0 +1,36 @@
+name: ci
+on:
+  pull_request:
+    branches: [develop, main]
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    services:
+      db:
+        image: mysql:8.4
+        env:
+          MYSQL_ROOT_PASSWORD: rootpass
+          MYSQL_DATABASE: idm3project2024
+          MYSQL_USER: gallery
+          MYSQL_PASSWORD: gallerypass
+        ports: ["3306:3306"]
+        options: --health-cmd="mysqladmin ping -h localhost" --health-interval=5s --health-retries=20
+
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: maven
+      - run: chmod +x mvnw
+      - name: Download Maven
+        env:
+          MVNW_VERBOSE: "true"
+        run: |
+          for i in 1 2 3; do
+            ./mvnw -B -v && exit 0
+            echo "Download failed, retrying in 15 seconds"; sleep 15
+          done
+          exit 1
+      - run: ./mvnw -B verify
