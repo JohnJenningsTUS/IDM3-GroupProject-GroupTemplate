@@ -29,9 +29,19 @@ Agree as a team which guide you're all using. Mixed setups are fine, but same-to
 | `.github/workflows/ci.yml` | Builds + tests every PR |
 | `.github/workflows/deploy-test.yml` | Auto-deploys `develop` to the test server |
 | `docker-compose.yml` | Local dev: app + MySQL |
-| `application-{dev,test,prod}.yml` | One config per environment |
+| `application-{dev,test,prod}.properties` | One config per environment |
 
-Log in with `student1 / Password123!` — dev/test only, never in prod.
+### Test logins
+
+Sign in at http://localhost:8080/MainGallery/Login with any of these accounts from the sample data:
+
+| Role | Username | Password |
+| --- | --- | --- |
+| Student | `TRYAN` | `pass123` |
+| Student | `MSith` | `123pass` |
+| Administrator | `tsmith` | `pass123` |
+| Administrator | `EBourke` | `Bourke123` |
+| Employer (viewer) | `PCbus` | `PC123` |
 
 `.idea/` and `.vscode/` are already in `.gitignore` — never commit editor settings.
 
