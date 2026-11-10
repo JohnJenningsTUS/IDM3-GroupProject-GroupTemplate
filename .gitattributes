@@ -1,0 +1,5 @@
+# Shell scripts must keep Unix line endings, even when checked out on Windows,
+# or they fail inside Docker and on the Linux servers.
+/mvnw text eol=lf
+*.sh text eol=lf
+*.cmd text eol=crlf
