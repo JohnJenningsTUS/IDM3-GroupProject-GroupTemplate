@@ -1,0 +1,100 @@
+name: deploy-prod
+on:
+  push:
+    tags: ['v*']
+concurrency: deploy-prod
+jobs:
+  deploy:
+    runs-on: [self-hosted, prod]
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - name: Check the tag is on main
+        run: |
+          if ! git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then
+            echo "Tag ${GITHUB_REF_NAME} is not on main. Only tag commits on main."
+            exit 1
+          fi
+      - name: Build the image
+        run: |
+          chmod +x mvnw
+          docker build -t gallery:${GITHUB_REF_NAME} .
+      - name: Write db.env from the repository secrets
+        env:
+          DB_PASSWORD: ${{ secrets.PROD_DB_PASSWORD }}
+          DB_ROOT_PASSWORD: ${{ secrets.PROD_DB_ROOT_PASSWORD }}
+        run: |
+          if [ -f ~/gallery/db.env ]; then
+            # The database keeps the passwords it was first created with, so an existing file wins.
+            if [ -n "$DB_PASSWORD" ] && ! grep -qxF "MYSQL_PASSWORD=$DB_PASSWORD" ~/gallery/db.env; then
+              echo "::warning::~/gallery/db.env on the server does not match the PROD_DB_PASSWORD secret. The server's file is used."
+            fi
+            echo "Using the existing ~/gallery/db.env"
+            exit 0
+          fi
+          if [ -z "$DB_PASSWORD" ] || [ -z "$DB_ROOT_PASSWORD" ]; then
+            echo "::error::Add the PROD_DB_PASSWORD and PROD_DB_ROOT_PASSWORD repository secrets (course step 3.1)."
+            exit 1
+          fi
+          case "$DB_PASSWORD$DB_ROOT_PASSWORD" in
+            *[!A-Za-z0-9]*) echo "::error::The database passwords must be letters and digits only."; exit 1 ;;
+          esac
+          mkdir -p ~/gallery
+          umask 077
+          printf 'MYSQL_DATABASE=idm3project2024\nMYSQL_USER=gallery\nMYSQL_PASSWORD=%s\nMYSQL_ROOT_PASSWORD=%s\n' \
+            "$DB_PASSWORD" "$DB_ROOT_PASSWORD" > ~/gallery/db.env
+          echo "Created ~/gallery/db.env"
+      - name: Start the database
+        run: |
+          docker network create gallery 2>/dev/null || true
+          if [ -z "$(docker ps -q -f name=^gallery-db$)" ]; then
+            mkdir -p ~/gallery/initdb
+            cp idm3project2024.sql ~/gallery/initdb/01-idm3project.sql
+            docker rm -f gallery-db 2>/dev/null || true
+            docker run -d --name gallery-db --network gallery --restart unless-stopped \
+              --env-file ~/gallery/db.env \
+              -v gallery-dbdata:/var/lib/mysql \
+              -v ~/gallery/initdb:/docker-entrypoint-initdb.d:ro \
+              --health-cmd "mysqladmin ping -h localhost" --health-interval 5s \
+              mysql:8.4
+          fi
+          for i in $(seq 1 60); do
+            if [ "$(docker inspect -f '{{.State.Health.Status}}' gallery-db)" = healthy ]; then echo "Database is up"; exit 0; fi
+            sleep 2
+          done
+          docker logs gallery-db
+          exit 1
+      - name: Replace the running container
+        run: |
+          set -a; . ~/gallery/db.env; set +a
+          docker rm -f gallery || true
+          docker run -d --name gallery --network gallery --restart unless-stopped \
+            -p 80:8080 -e SPRING_PROFILES_ACTIVE=prod \
+            -e APP_BUILD_INFO="Release ${GITHUB_REF_NAME}" \
+            -e SPRING_DATASOURCE_URL="jdbc:mysql://gallery-db:3306/$MYSQL_DATABASE" \
+            -e SPRING_DATASOURCE_USERNAME="$MYSQL_USER" \
+            -e SPRING_DATASOURCE_PASSWORD="$MYSQL_PASSWORD" \
+            gallery:${GITHUB_REF_NAME}
+      - name: Wait for the app to answer
+        run: |
+          for i in $(seq 1 60); do
+            if curl -fs http://localhost/MainGallery/Login > /dev/null; then echo "Release ${GITHUB_REF_NAME} is up"; exit 0; fi
+            sleep 2
+          done
+          docker logs gallery
+          exit 1
+      - name: Show the site address
+        run: |
+          # Ask AWS for this instance's public IP. It changes each time the lab restarts.
+          TOKEN=$(curl -fsS --max-time 5 -X PUT http://169.254.169.254/latest/api/token \
+            -H "X-aws-ec2-metadata-token-ttl-seconds: 60" || true)
+          IP=$(curl -fsS --max-time 5 -H "X-aws-ec2-metadata-token: $TOKEN" \
+            http://169.254.169.254/latest/meta-data/public-ipv4 || true)
+          SITE=${IP:+http://$IP/MainGallery/HomePage}
+          {
+            echo "### Release ${GITHUB_REF_NAME} deployed"
+            echo "- Site: ${SITE:-no public IP found}"
+            echo "- Database: $(grep '^MYSQL_DATABASE=' ~/gallery/db.env | cut -d= -f2), user $(grep '^MYSQL_USER=' ~/gallery/db.env | cut -d= -f2)"
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "Site: ${SITE:-no public IP found}"
