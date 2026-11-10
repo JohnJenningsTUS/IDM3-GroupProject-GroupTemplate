@@ -27,14 +27,43 @@ jobs:
         run: |
           chmod +x mvnw
           docker build -t gallery:test .
+      - name: Start the database
+        run: |
+          if [ ! -f ~/gallery/db.env ]; then
+            echo "::error::~/gallery/db.env is missing on the test server. Create it first (course step 2.6)."
+            exit 1
+          fi
+          docker network create gallery 2>/dev/null || true
+          if [ -z "$(docker ps -q -f name=^gallery-db$)" ]; then
+            mkdir -p ~/gallery/initdb
+            cp idm3project2024.sql ~/gallery/initdb/01-idm3project.sql
+            docker rm -f gallery-db 2>/dev/null || true
+            docker run -d --name gallery-db --network gallery --restart unless-stopped \
+              --env-file ~/gallery/db.env \
+              -v gallery-dbdata:/var/lib/mysql \
+              -v ~/gallery/initdb:/docker-entrypoint-initdb.d:ro \
+              --health-cmd "mysqladmin ping -h localhost" --health-interval 5s \
+              mysql:8.4
+          fi
+          for i in $(seq 1 60); do
+            if [ "$(docker inspect -f '{{.State.Health.Status}}' gallery-db)" = healthy ]; then echo "Database is up"; exit 0; fi
+            sleep 2
+          done
+          docker logs gallery-db
+          exit 1
       - name: Replace the running container
         run: |
+          set -a; . ~/gallery/db.env; set +a
           docker rm -f gallery || true
-          docker run -d --name gallery --restart unless-stopped \
-            -p 80:8080 -e SPRING_PROFILES_ACTIVE=test -e APP_BUILD_INFO="$BUILD_INFO" gallery:test
+          docker run -d --name gallery --network gallery --restart unless-stopped \
+            -p 80:8080 -e SPRING_PROFILES_ACTIVE=test -e APP_BUILD_INFO="$BUILD_INFO" \
+            -e SPRING_DATASOURCE_URL="jdbc:mysql://gallery-db:3306/$MYSQL_DATABASE" \
+            -e SPRING_DATASOURCE_USERNAME="$MYSQL_USER" \
+            -e SPRING_DATASOURCE_PASSWORD="$MYSQL_PASSWORD" \
+            gallery:test
       - name: Wait for the app to answer
         run: |
-          for i in $(seq 1 30); do
+          for i in $(seq 1 60); do
             if curl -fs http://localhost/MainGallery/Login > /dev/null; then echo "App is up"; exit 0; fi
             sleep 2
           done
