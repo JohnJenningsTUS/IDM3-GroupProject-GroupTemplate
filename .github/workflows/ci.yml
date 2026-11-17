@@ -33,4 +33,18 @@ jobs:
             echo "Download failed, retrying in 15 seconds"; sleep 15
           done
           exit 1
+      - name: Load the sample data
+        run: |
+          for i in $(seq 1 30); do
+            docker exec ${{ job.services.db.id }} mysql -uroot -prootpass -e 'SELECT 1' > /dev/null 2>&1 && break
+            sleep 2
+          done
+          docker exec -i ${{ job.services.db.id }} mysql -uroot -prootpass idm3project2024 < idm3project2024.sql
       - run: ./mvnw -B verify
+      - name: Start the app
+        run: nohup java -jar target/*.jar > app.log 2>&1 &
+      - name: Smoke check
+        run: bash .github/smoke-check.sh
+      - name: Show the app log
+        if: failure()
+        run: cat app.log 2>/dev/null || echo "No app log, because the app was not started."
