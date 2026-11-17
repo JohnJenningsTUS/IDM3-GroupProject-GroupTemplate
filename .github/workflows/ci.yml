@@ -47,4 +47,4 @@ jobs:
         run: bash .github/smoke-check.sh
       - name: Show the app log
         if: failure()
-        run: cat app.log 2>/dev/null || echo "No app log: the app was not started."
+        run: cat app.log 2>/dev/null || echo "No app log, because the app was not started."
